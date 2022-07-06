@@ -8,6 +8,7 @@ import { TransactionService } from "./transaction.service";
 
 const port = process.env.NODE_PORT ?? 8080;
 const app = express();
+app.use(express.json());
 
 const transactionService: TransactionService = new TransactionService();
 

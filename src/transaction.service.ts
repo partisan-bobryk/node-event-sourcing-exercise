@@ -56,7 +56,7 @@ export class TransactionService {
    * @param pointsToRemove
    * @returns TransactionService
    */
-  removePoints(pointsToRemove: number): TransactionService {
+  spendPoints(pointsToRemove: number): Partial<Transaction>[] {
     if (isNaN(pointsToRemove) || pointsToRemove <= 0) {
       throw new Error("Points must be a valid positive value");
     }
@@ -72,9 +72,10 @@ export class TransactionService {
      * cover our backs.
      *
      * Basically any changes to the logic here in the future that would cause
-     * improper point calculation would be cought by the test.
+     * improper point calculation would be caught by the test.
      */
-    const depletedTransactionIndexes: Set<number> = new Set();
+    const spentTransactions: Partial<Transaction>[] = [];
+    const spentPayerTotal: Record<string, number> = {};
     let pointsLeft: number = pointsToRemove;
 
     for (let i = 0; i < this.transactionStore?.length; i++) {
@@ -96,36 +97,31 @@ export class TransactionService {
       this.transactionStore[i].points -= pointsToRemove;
       pointsLeft -= pointsToRemove;
 
-      /*
-       * Check if we actually depleted any payers and if so remove them.
-       *
-       * It may be silly to keep track of which index to remove in a set, as we can
-       * totally minimize our space complexity by using one variable to track the last
-       * index to be removed. Then once we are done, purge any transactions up to the
-       * last index; however, this current approach allows us to easily implement filtering.
-       *
-       * For example, "Remove (points) only from (payer) until (time)"
-       */
-      if (this.transactionStore[i].points === 0) {
-        depletedTransactionIndexes.add(i);
+      if (!spentPayerTotal[this.transactionStore[i].payer]) {
+        spentPayerTotal[this.transactionStore[i].payer] = 0;
       }
+
+      spentPayerTotal[this.transactionStore[i].payer] -= pointsToRemove;
     }
 
-    if (!depletedTransactionIndexes.size) {
-      return this;
+    return Object.entries(spentPayerTotal).map(([payer, points]) => ({
+      payer,
+      points,
+    }));
+  }
+
+  showPayerPoints(): Record<string, number> {
+    const payerPoints: Record<string, number> = {};
+
+    for (const transaction of this.transactionStore) {
+      if (!payerPoints[transaction.payer]) {
+        payerPoints[transaction.payer] = 0;
+      }
+
+      payerPoints[transaction.payer] += transaction.points;
     }
 
-    /*
-     * After we have depleted the points we need to comb through the transaction list and remove the indexes.
-     *
-     * The reason why we didn't do it as part of the point calculation loop is because madification to the array will
-     * cause reindexing and this might lead to a bad index pointer.
-     */
-    this.transactionStore = this.transactionStore.filter(
-      (_, index) => !depletedTransactionIndexes.has(index)
-    );
-
-    return this;
+    return payerPoints;
   }
 
   /**
@@ -138,6 +134,6 @@ export class TransactionService {
    */
   private sortByTimeFn(a: Transaction, b: Transaction): number {
     // date.getTime() gives us the date in milliseconds.
-    return b.timestamp.getTime() - a.timestamp.getTime();
+    return a.timestamp.getTime() - b.timestamp.getTime();
   }
 }

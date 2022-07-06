@@ -9,54 +9,106 @@ export type RouteDefinition = {
   ) => any;
 };
 
-const buildAddTransactionRoute: RouteDefinition = (
+export const buildAddTransactionRoute: RouteDefinition = (
   transactionService: TransactionService
 ) => {
   return (req: express.Request, res: express.Response) => {
-    const rawTransactions: Transaction | Transaction[] = req.body;
-    let transactions: Transaction[];
+    if (!req?.body) {
+      return failedResponse(res, "Missing request payload", 400);
+    }
 
+    const rawTransactions: any | any[] = req.body;
+    let transactions: Transaction[] = [];
     try {
       if (Array.isArray(rawTransactions)) {
-        transactions = rawTransactions?.map((rawTransactions) => {
-          return {
-            ...rawTransactions,
-            timestamp: new Date(rawTransactions?.timestamp),
-          };
-        });
+        for (const rawTransaction of rawTransactions) {
+          const transaction = unmarshalTransaction(rawTransaction);
+          transactions.push(transaction);
+        }
       } else {
-        transactions = [
-          { ...rawTransactions, timestamp: rawTransactions?.timestamp },
-        ];
+        const transaction = unmarshalTransaction(rawTransactions);
+        transactions = [transaction];
       }
 
       transactionService.add(...transactions);
     } catch (err) {
-      res.status(500).json({
-        error: err?.message,
-      });
+      return failedResponse(res, err?.message, 400);
     }
 
-    res.status(200).json({ Ok: 200 });
+    return successfulResponse(res, "Ok");
   };
 };
 
-const buildSpendPointsRoute: RouteDefinition = (
-  transactionService: TransactionService
-) => {
-  return (req: express.Request, res: express.Response) => {};
-};
-
-const buildPointBalanceRoute: RouteDefinition = (
+export const buildSpendPointsRoute: RouteDefinition = (
   transactionService: TransactionService
 ) => {
   return (req: express.Request, res: express.Response) => {
-    res.status(200).json(transactionService.transactionStore);
+    if (!req?.body) {
+      return failedResponse(res, "Missing request payload", 400);
+    }
+
+    const pointsPayload: { points: number } = req.body;
+
+    if (!pointsPayload?.points) {
+      return failedResponse(res, "Missing points field", 400);
+    }
+
+    if (isNaN(pointsPayload?.points) || pointsPayload.points < 0) {
+      return failedResponse(
+        res,
+        "Points field must be a valid positive number"
+      );
+    }
+
+    try {
+      const spentPoints: Partial<Transaction>[] =
+        transactionService.spendPoints(pointsPayload.points);
+      return successfulResponse(res, spentPoints);
+    } catch (err) {
+      return failedResponse(res, err?.message);
+    }
   };
 };
 
-export {
-  buildAddTransactionRoute,
-  buildSpendPointsRoute,
-  buildPointBalanceRoute,
+export const buildPointBalanceRoute: RouteDefinition = (
+  transactionService: TransactionService
+) => {
+  return (req: express.Request, res: express.Response) => {
+    return successfulResponse(res, transactionService.showPayerPoints());
+  };
 };
+
+const unmarshalTransaction = (payload: Record<string, any>): Transaction => {
+  const transaction: Transaction = {
+    payer: payload["payer"],
+    points: payload["points"],
+    timestamp: new Date(payload["timestamp"]),
+  };
+
+  validateTransaction(transaction);
+
+  return transaction;
+};
+
+const validateTransaction = (transaction: Transaction): void => {
+  if (!transaction["payer"]) {
+    throw new Error("Missing payer field");
+  }
+
+  if (!transaction["timestamp"]) {
+    throw new Error("Timestamp must be a valid date");
+  }
+
+  if (!transaction["points"] || isNaN(transaction["points"])) {
+    throw new Error("Missing points field, must be a positive number");
+  }
+};
+
+const successfulResponse = (res: express.Response, payload: any) =>
+  res.status(200).json({ data: payload });
+
+const failedResponse = (
+  res: express.Response,
+  errorMessage: string,
+  statusCode: number = 500
+) => res.status(statusCode).json({ error: errorMessage });
