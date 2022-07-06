@@ -49,7 +49,7 @@ export const buildSpendPointsRoute: RouteDefinition = (
 
     const pointsPayload: { points: number } = req.body;
 
-    if (!pointsPayload?.points) {
+    if (pointsPayload?.points === undefined || pointsPayload?.points === null) {
       return failedResponse(res, "Missing points field", 400);
     }
 
