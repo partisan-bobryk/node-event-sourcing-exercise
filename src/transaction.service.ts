@@ -59,7 +59,7 @@ export class TransactionService {
    * @returns TransactionService
    */
   spendPoints(pointsToSpend: number): Partial<Transaction>[] {
-    if (isNaN(pointsToSpend) || pointsToSpend <= 0) {
+    if (isNaN(pointsToSpend) || pointsToSpend < 0) {
       throw new Error("Points to spend must be a valid positive number");
     }
 
@@ -67,23 +67,19 @@ export class TransactionService {
     let pointsLeft: number = pointsToSpend;
     let transactionIndex: number = 0;
 
-    console.log("spending points ====== ", pointsToSpend);
+    while (pointsLeft > 0) {
+      if (transactionIndex >= totalNumberOfTransactions) {
+        // No more transactions to go through
+        break;
+      }
 
-    while (pointsLeft > 0 || transactionIndex < totalNumberOfTransactions) {
       const { points, payer } = this.transactionStore[transactionIndex];
-      const pointsToRemove: number = Math.min(points, pointsLeft);
-
-      console.log(
-        "Balance: ",
-        payer,
-        points,
-        this.transactionSnapshotBalance[payer],
-        " removing: ",
-        -1 * pointsToRemove
+      const pointsToRemove: number = Math.min(
+        Math.min(points, pointsLeft),
+        this.transactionSnapshotBalance[payer]
       );
 
-      if (this.transactionSnapshotBalance[payer] === 0) {
-        console.log("Payer out of money:", payer);
+      if (this.transactionSnapshotBalance[payer] <= 0) {
         transactionIndex++;
         continue;
       }
@@ -95,12 +91,11 @@ export class TransactionService {
         points: -1 * pointsToRemove,
         timestamp: new Date(),
       };
-      console.log("Adding transaction: ", transaction);
       this.add(transaction);
-      console.log("current trans snap =>", this.transactionSnapshotBalance);
 
       transactionIndex++;
     }
+
     const spentProjection = this.buildProjectionFromIndex(
       totalNumberOfTransactions
     );
@@ -149,10 +144,9 @@ export class TransactionService {
       this.transactionStore.slice(startIdx);
 
     for (const transaction of subsetTransactions) {
-      if (!projection[transaction.payer]) {
+      if (projection[transaction.payer] === undefined) {
         projection[transaction.payer] = 0;
       }
-
       projection[transaction.payer] += transaction.points;
     }
 
