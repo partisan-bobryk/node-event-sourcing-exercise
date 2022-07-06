@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Transaction } from "./transaction.model";
 
 export class TransactionService {
@@ -5,6 +6,8 @@ export class TransactionService {
    * A simple in-memory data store of all recorded transactions.
    */
   transactionStore: Transaction[] = [];
+  // transactionStore: Record<string, Transaction> = {};
+  transactionSnapshotBalance: Record<string, number> = {};
 
   /**
    * Add one or many transaction at one time.
@@ -27,9 +30,8 @@ export class TransactionService {
    * ```
    *
    * @param transactions
-   * @returns TransactionService
    */
-  add(...transactions: Transaction[]): TransactionService {
+  add(...transactions: Transaction[]): void {
     this.transactionStore.push(...transactions);
 
     /*
@@ -39,11 +41,11 @@ export class TransactionService {
      * we can save some time on more frequent operations such as using up points.
      */
     this.transactionStore.sort(this.sortByTimeFn);
-    return this;
+    this.transactionSnapshotBalance = this.buildProjection();
   }
 
   /**
-   * Remove some number of points from the transaction list.
+   * Remove some number of points
    *
    * @remarks
    * Number of points to remove must be a positive number
@@ -56,72 +58,105 @@ export class TransactionService {
    * @param pointsToRemove
    * @returns TransactionService
    */
-  spendPoints(pointsToRemove: number): Partial<Transaction>[] {
-    if (isNaN(pointsToRemove) || pointsToRemove <= 0) {
-      throw new Error("Points must be a valid positive value");
+  spendPoints(pointsToSpend: number): Partial<Transaction>[] {
+    if (isNaN(pointsToSpend) || pointsToSpend <= 0) {
+      throw new Error("Points to spend must be a valid positive number");
     }
 
-    /*
-     * The list is already sorted in chronological order. So that makes it easier
-     * to remove points as we start walking through the array with the oldest
-     * transaction first.
-     *
-     * Note that in the loop my comparison are being strict by having to be equal to 0.
-     * Reason being is that if we start removing transactions with negative amounts, with logic such as pointsLeft <= 0,
-     * we will never catch miscalculated points. The solution is to write robust unit test for this function to
-     * cover our backs.
-     *
-     * Basically any changes to the logic here in the future that would cause
-     * improper point calculation would be caught by the test.
-     */
-    const spentTransactions: Partial<Transaction>[] = [];
-    const spentPayerTotal: Record<string, number> = {};
-    let pointsLeft: number = pointsToRemove;
+    const totalNumberOfTransactions: number = this.transactionStore.length;
+    let pointsLeft: number = pointsToSpend;
+    let transactionIndex: number = 0;
 
-    for (let i = 0; i < this.transactionStore?.length; i++) {
-      // No more points left to remove, so we're done
-      if (pointsLeft === 0) {
-        break;
-      }
+    console.log("spending points ====== ", pointsToSpend);
 
-      /*
-       * Using the Math.min method allows us to cap the maximum number of points we can
-       * possibly remove from this transaction. This is also the likely area
-       * of points being miscalculated.
-       */
-      const pointsToRemove: number = Math.min(
-        this.transactionStore[i].points,
-        pointsLeft
+    while (pointsLeft > 0 || transactionIndex < totalNumberOfTransactions) {
+      const { points, payer } = this.transactionStore[transactionIndex];
+      const pointsToRemove: number = Math.min(points, pointsLeft);
+
+      console.log(
+        "Balance: ",
+        payer,
+        points,
+        this.transactionSnapshotBalance[payer],
+        " removing: ",
+        -1 * pointsToRemove
       );
 
-      this.transactionStore[i].points -= pointsToRemove;
-      pointsLeft -= pointsToRemove;
-
-      if (!spentPayerTotal[this.transactionStore[i].payer]) {
-        spentPayerTotal[this.transactionStore[i].payer] = 0;
+      if (this.transactionSnapshotBalance[payer] === 0) {
+        console.log("Payer out of money:", payer);
+        transactionIndex++;
+        continue;
       }
 
-      spentPayerTotal[this.transactionStore[i].payer] -= pointsToRemove;
-    }
+      pointsLeft -= pointsToRemove;
 
-    return Object.entries(spentPayerTotal).map(([payer, points]) => ({
+      const transaction: Transaction = {
+        payer,
+        points: -1 * pointsToRemove,
+        timestamp: new Date(),
+      };
+      console.log("Adding transaction: ", transaction);
+      this.add(transaction);
+      console.log("current trans snap =>", this.transactionSnapshotBalance);
+
+      transactionIndex++;
+    }
+    const spentProjection = this.buildProjectionFromIndex(
+      totalNumberOfTransactions
+    );
+
+    return Object.entries(spentProjection).map(([payer, points]) => ({
       payer,
       points,
     }));
   }
 
   showPayerPoints(): Record<string, number> {
-    const payerPoints: Record<string, number> = {};
+    return this.transactionSnapshotBalance;
+  }
 
-    for (const transaction of this.transactionStore) {
-      if (!payerPoints[transaction.payer]) {
-        payerPoints[transaction.payer] = 0;
-      }
-
-      payerPoints[transaction.payer] += transaction.points;
+  private buildProjection(fromTimestamp?: Date): Record<string, number> {
+    /*
+     * Assume set of all transaction is finite, the transaction that we are looking for
+     * divides the whole set into two subsets. Where subset A contains all transactions with lower value timestamps,
+     * while subset B contains transactions with larger value timestamps than provided timestamp. We build our
+     * projections in the forward directions such that the last timestamp would always be getting bigger.
+     *
+     * The reason why this is important is this idea dictates the higher probability of finding a timestamp in subset B. In
+     * a brute force approach this would allow us to search from the most recent transactions backwards, but we can go even faster
+     * if we use binary search. The transactions are already sorted as they are being added.
+     *
+     * Note: It is not recommended to use an index to keep track of the last transaction as we can insert transactions with any timestamp
+     * and that alone will throw off the index accuracy.
+     */
+    if (!fromTimestamp) {
+      return this.buildProjectionFromIndex();
     }
 
-    return payerPoints;
+    const startIndex = this.findIndexFromTimestamp(
+      this.transactionStore,
+      fromTimestamp
+    );
+
+    return this.buildProjectionFromIndex(startIndex + 1);
+  }
+
+  private buildProjectionFromIndex(index: number = 0): Record<string, number> {
+    const startIdx = Math.max(index, 0);
+    const projection: Record<string, number> = {};
+
+    const subsetTransactions: Transaction[] =
+      this.transactionStore.slice(startIdx);
+
+    for (const transaction of subsetTransactions) {
+      if (!projection[transaction.payer]) {
+        projection[transaction.payer] = 0;
+      }
+
+      projection[transaction.payer] += transaction.points;
+    }
+
+    return projection;
   }
 
   /**
@@ -135,5 +170,45 @@ export class TransactionService {
   private sortByTimeFn(a: Transaction, b: Transaction): number {
     // date.getTime() gives us the date in milliseconds.
     return a.timestamp.getTime() - b.timestamp.getTime();
+  }
+
+  /**
+   * Performs a binary search through the transactions.
+   *
+   * Will return -1 if not found or an index from the array that contains the timestamp
+   *
+   * @param transactions
+   * @param timestamp
+   * @returns number
+   */
+  private findIndexFromTimestamp(
+    transactions: Transaction[],
+    timestamp: Date
+  ): number {
+    let foundIndex;
+    let lowBounds = 0;
+    let highBounds = transactions?.length - 1;
+
+    while (lowBounds <= highBounds) {
+      // Find the mid point
+      foundIndex = Math.floor((lowBounds + highBounds) / 2);
+      if (transactions[foundIndex].timestamp.getTime() < timestamp.getTime()) {
+        lowBounds = foundIndex + 1;
+      } else if (
+        transactions[foundIndex].timestamp.getTime() > timestamp.getTime()
+      ) {
+        highBounds = foundIndex - 1;
+      } else {
+        return foundIndex;
+      }
+    }
+    return -1;
+  }
+
+  private hashTransaction(transaction: Transaction): string {
+    return crypto
+      .createHash("sha256")
+      .update(JSON.stringify(transaction))
+      .digest("hex");
   }
 }
