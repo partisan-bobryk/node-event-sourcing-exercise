@@ -74,18 +74,35 @@ export class TransactionService {
       }
 
       const { points, payer } = this.transactionStore[transactionIndex];
+
+      /*
+       * Using Math.min we can clamp the number of allowed
+       * points that can be removed.
+       *
+       * We are limited by three things:
+       * 1. The number of points we have left over from our initial request
+       * 2. The number of points available as part of this transaction
+       * 3. The total balance of the payer.
+       */
       const pointsToRemove: number = Math.min(
         Math.min(points, pointsLeft),
         this.transactionSnapshotBalance[payer]
       );
 
       if (this.transactionSnapshotBalance[payer] <= 0) {
+        // Skip to the next transaction
         transactionIndex++;
         continue;
       }
 
       pointsLeft -= pointsToRemove;
 
+      /*
+       * We shouldn't be modifying the state or the transactions directly as it breaks
+       * the event sourcing paradigm. Instead we should make a new transaction
+       * that will remove the maximum number of allowed points. When we need the balance
+       * we would only have to add up the transaction to get our true state.
+       */
       const transaction: Transaction = {
         payer,
         points: -1 * pointsToRemove,
@@ -96,6 +113,10 @@ export class TransactionService {
       transactionIndex++;
     }
 
+    /*
+     * One of the cool benefits of event sourcing is that we can just grab the last
+     * few transactions to get the distribution of the points we wanted to spend
+     */
     const spentProjection = this.buildProjectionFromIndex(
       totalNumberOfTransactions
     );
@@ -106,6 +127,11 @@ export class TransactionService {
     }));
   }
 
+  /**
+   * Simply returns the last cached projection
+   *
+   * @returns Record<string, number>
+   */
   showPayerPoints(): Record<string, number> {
     return this.transactionSnapshotBalance;
   }
@@ -199,6 +225,12 @@ export class TransactionService {
     return -1;
   }
 
+  /**
+   * Generate a hash for the transaction in order to verify integrity
+   *
+   * @param transaction
+   * @returns string
+   */
   private hashTransaction(transaction: Transaction): string {
     return crypto
       .createHash("sha256")
