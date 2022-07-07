@@ -6,7 +6,7 @@ A simple web server that demonstrates Event Sourcing.
 
 ### Requirements
 
-- node `v16` or greater. [Download NodeJS LTS version]("https://nodejs.org/en/download/")
+- node `v16` or greater. [Download NodeJS LTS version](https://nodejs.org/en/download/)
 
 ### Building
 
