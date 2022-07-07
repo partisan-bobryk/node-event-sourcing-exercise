@@ -13,7 +13,7 @@ export const buildAddTransactionRoute: RouteDefinition = (
   transactionService: TransactionService
 ) => {
   return (req: express.Request, res: express.Response) => {
-    if (!req?.body) {
+    if (Object.keys(req?.body).length === 0) {
       return failedResponse(res, "Missing request payload", 400);
     }
 
@@ -43,20 +43,17 @@ export const buildSpendPointsRoute: RouteDefinition = (
   transactionService: TransactionService
 ) => {
   return (req: express.Request, res: express.Response) => {
-    if (!req?.body) {
+    if (Object.keys(req?.body).length === 0) {
       return failedResponse(res, "Missing request payload", 400);
     }
 
     const pointsPayload: { points: number } = req.body;
 
-    if (pointsPayload?.points === undefined || pointsPayload?.points === null) {
-      return failedResponse(res, "Missing points field", 400);
-    }
-
     if (isNaN(pointsPayload?.points) || pointsPayload.points < 0) {
       return failedResponse(
         res,
-        "Points field must be a valid positive number"
+        "Points field must be a valid positive number",
+        400
       );
     }
 
@@ -82,7 +79,9 @@ const unmarshalTransaction = (payload: Record<string, any>): Transaction => {
   const transaction: Transaction = {
     payer: payload["payer"],
     points: payload["points"],
-    timestamp: new Date(payload["timestamp"]),
+    timestamp: payload["timestamp"]
+      ? new Date(payload["timestamp"])
+      : undefined,
   };
 
   validateTransaction(transaction);
@@ -100,7 +99,7 @@ const validateTransaction = (transaction: Transaction): void => {
   }
 
   if (!transaction["points"] || isNaN(transaction["points"])) {
-    throw new Error("Missing points field, must be a positive number");
+    throw new Error("Missing points field, must be a number");
   }
 };
 
