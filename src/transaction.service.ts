@@ -6,7 +6,9 @@ export class TransactionService {
    * A simple in-memory data store of all recorded transactions.
    */
   transactionStore: Transaction[] = [];
-  // transactionStore: Record<string, Transaction> = {};
+  /**
+   * A temporary state representation of all payers and their accumulated points.
+   */
   transactionSnapshotBalance: Record<string, number> = {};
 
   /**
@@ -140,7 +142,7 @@ export class TransactionService {
     /*
      * Assume set of all transaction is finite, the transaction that we are looking for
      * divides the whole set into two subsets. Where subset A contains all transactions with lower value timestamps,
-     * while subset B contains transactions with larger value timestamps than provided timestamp. We build our
+     * while subset B contains transactions with larger value timestamps than the provided timestamp. We build our
      * projections in the forward directions such that the last timestamp would always be getting bigger.
      *
      * The reason why this is important is this idea dictates the higher probability of finding a timestamp in subset B. In
@@ -162,6 +164,12 @@ export class TransactionService {
     return this.buildProjectionFromIndex(startIndex + 1);
   }
 
+  /**
+   * Starts projecting transactions at a specified index
+   *
+   * @param index
+   * @returns
+   */
   private buildProjectionFromIndex(index: number = 0): Record<string, number> {
     const startIdx = Math.max(index, 0);
     const projection: Record<string, number> = {};
@@ -170,6 +178,7 @@ export class TransactionService {
       this.transactionStore.slice(startIdx);
 
     for (const transaction of subsetTransactions) {
+      // Explicitly using undefined as JS treats 0 as falsy value
       if (projection[transaction.payer] === undefined) {
         projection[transaction.payer] = 0;
       }
